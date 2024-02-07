@@ -1,7 +1,11 @@
 import torch
 import torch.nn as nn
 
-
+一个 LayerNorm 层用于输入张量 x 的归一化。
+一个 1x1 卷积层 (self.fc1)，将输入的特征维度降低到一个较小的维度（即 hidden_features）。
+一个 3x3 深度可分离卷积层 (self.dwconv)，对特征进行深度方向的卷积操作。
+另一个 1x1 卷积层 (self.fc2)，将特征维度恢复到原始维度。
+一个 GELU 激活函数用于激活每个卷积层的输出。
 class FeedForward(nn.Module):
     def __init__(self, dim, mlp_ratio=4):
         super().__init__()
@@ -11,7 +15,9 @@ class FeedForward(nn.Module):
         self.dwconv = nn.Conv2d(hidden_features, hidden_features, 3, padding=1, groups=hidden_features)
         self.fc2 = nn.Conv2d(hidden_features, dim, 1)
         self.act = nn.GELU()
-
+在 forward 方法中，输入先经过归一化处理，然后通过第一个卷积层和 GELU 激活函数。
+接着将输出保存到 res 中以备后用，然后经过深度可分离卷积层，再次经过激活函数。
+最后将之前保存的 res 与当前的输出相加，得到最终的输出，再通过第二个卷积层得到最终的特征表示。
     def forward(self, x):
         x = self.norm(x)
         x = self.fc1(x)
@@ -21,8 +27,15 @@ class FeedForward(nn.Module):
         x = self.act(x) + res
         x = self.fc2(x)
         return x
+这个结构可以有效地捕捉输入特征之间的关系，并且在一些深度学习模型中被广泛使用。
 
 
+一个 LayerNorm 层用于输入张量 x 的归一化。
+一个 1x1 卷积层 (self.qk) 用于计算 Query 和 Key。
+一个 GELU 激活函数用于激活 Query 和 Key。
+一个 11x11 的深度可分离卷积层 (self.dwconv) 用于计算注意力权重。
+一个 1x1 卷积层 (self.v) 用于计算 Value。
+一个 1x1 卷积层 (self.proj) 用于将注意力权重应用到 Value 上。
 class Attention(nn.Module):
     def __init__(self, dim, bias=False):
         super().__init__()
@@ -33,7 +46,9 @@ class Attention(nn.Module):
 
         self.v = nn.Conv2d(dim, dim, 1)
         self.proj = nn.Conv2d(dim, dim, 1)
-
+在 forward 方法中，输入先经过归一化处理，然后通过 Query 和 Key 的卷积层，再经过 GELU 激活函数。
+接着通过深度可分离卷积层计算注意力权重，并再次经过激活函数。然后通过 Value 的卷积层计算 Value。
+最后将注意力权重应用到 Value 上，并通过 self.proj 卷积层得到最终的输出。
     def forward(self, x):
         x = self.norm(x)
         qk = self.qk(x)
@@ -44,8 +59,13 @@ class Attention(nn.Module):
         x = attn * v
         x = self.proj(x)
         return x
+自注意力机制允许模型在处理序列数据时动态地分配不同位置的注意力权重，是 Transformer 模型的核心组件之一。
 
 
+这段代码定义了一个卷积块（ConvolutionBlock），它由注意力模块（Attention）和前馈神经网络模块（FeedForward）组成。
+一个注意力模块 self.attn，用于处理输入张量 x。
+一个前馈神经网络模块 self.ffn，也用于处理输入张量 x。
+两个参数 self.layer_scale_1 和 self.layer_scale_2，用于对两个模块的输出进行调节。
 class ConvolutionBlock(nn.Module):
     def __init__(self, dim, mlp_ratio=4):
         super().__init__()
@@ -56,13 +76,18 @@ class ConvolutionBlock(nn.Module):
             layer_scale_init_value * torch.ones((dim)), requires_grad=True)
         self.layer_scale_2 = nn.Parameter(
             layer_scale_init_value * torch.ones((dim)), requires_grad=True)
-
+在 forward 方法中，输入先经过注意力模块，然后通过参数 self.layer_scale_1 进行缩放，并与输入相加。
+接着，将输出再次经过前馈神经网络模块，然后通过参数 self.layer_scale_2 进行缩放，并再次与之前的输出相加。最终的输出就是卷积块的输出。
     def forward(self, x):
         x = x + self.layer_scale_1.unsqueeze(-1).unsqueeze(-1) * self.attn(x)
         x = x + self.layer_scale_2.unsqueeze(-1).unsqueeze(-1) * self.ffn(x)
         return x
+这种结构允许模型在处理序列数据时通过注意力机制捕捉输入之间的关系，并通过前馈神经网络进行非线性变换和特征提取。
 
-
+self.weight：用于缩放输入的可学习权重参数。
+self.bias：用于偏移输入的可学习偏置参数。
+self.eps：用于稳定计算的小值。
+层归一化！
 class LayerNorm(nn.Module):
     def __init__(self, dim):
         super().__init__()
@@ -77,7 +102,7 @@ class LayerNorm(nn.Module):
         x = self.weight[:, None, None] * x + self.bias[:, None, None]
         return x
 
-
+一个 2D 卷积层 self.proj，其作用是将输入图像分割成小的图像块，并将每个图像块映射到一个低维的向量空间中。这个卷积层的输出维度为 embed_dim，即每个图像块被映射到的向量的维度。
 class PatchEmbed(nn.Module):
     def __init__(self, in_c=3, embed_dim=48, bias=False):
         super().__init__()
@@ -86,6 +111,11 @@ class PatchEmbed(nn.Module):
     def forward(self, x):
         x = self.proj(x)
         return x
+PatchEmbed 模块通常用于 Vision Transformer 等模型中，将输入图像转换为序列数据，以便于后续的自注意力操作。
+
+
+
+
 
 
 class Downsample(nn.Module):
@@ -119,7 +149,7 @@ class Downsample(nn.Module):
         x = (attn @ v).reshape(out_shape) + v_hp
         x = self.proj(x)
         return x
-
+该 Downsample 模块通常用于自注意力模型（如 Transformer）的下采样操作，用于减小特征图的尺寸并增加通道数。
 
 class Upsample(nn.Module):
     def __init__(self, dim, num_head=8, bias=False):
@@ -166,7 +196,11 @@ class RSFormer(nn.Module):
                  ):
 
         super(RSFormer, self).__init__()
-
+        PatchEmbed 模块： 将输入图像分块并映射到低维向量空间中。
+        编码器（Encoder）： 由多个卷积块组成的序列，用于逐步提取图像特征。每个阶段都包括一个下采样模块和多个卷积块。
+        解码器（Decoder）： 由多个卷积块组成的序列，用于逐步将特征向量还原为图像。每个阶段都包括一个上采样模块和多个卷积块。
+        精化层（Refinement）： 由多个卷积块组成的序列，用于进一步改进重建图像的质量。
+        输出层（Output）： 将最终的特征图映射回原始图像的通道数。
         self.patch_embed = PatchEmbed(in_channels, dim)
         self.encoder1 = nn.Sequential(*[
             ConvolutionBlock(dim=dim, mlp_ratio=mlp_ratios[0]) for i in range(num_blocks[0])])
@@ -199,7 +233,8 @@ class RSFormer(nn.Module):
 
         self.refinement = nn.Sequential(*[ConvolutionBlock(dim=int(dim * 2 ** 1), mlp_ratio=mlp_ratios[0]) for i in range(num_refinement_blocks)])
         self.output = nn.Conv2d(int(dim * 2 ** 1), in_channels, kernel_size=3, stride=1, padding=1, bias=bias)
-
+在 forward 方法中，模型首先通过 PatchEmbed 模块将输入图像分块并映射到低维向量空间中。然后通过编码器逐步提取图像特征，再通过解码器逐步将特征向量还原为图像。
+最后，通过精化层进一步改进重建图像的质量，并通过输出层映射回原始图像的通道数。整个过程中，输入图像的信息被逐步压缩和解压缩，从而实现图像的重建。
     def forward(self, x):
         input_ = x
         x = self.patch_embed(x)  # stage 1
